@@ -1,72 +1,20 @@
 import copy
 
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
-from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 
 from dataloader import PoisonDataset
 from model.lenet import LeNet
+from tools.draw_bar import draw_bar
+from tools.mixture import mixing_model
+from tools.options import get_criterion, get_optimizer
+from tools.test import test
+from tools.train import train
 
 
-def train(model, net_criterion, optimizer, train_data_loader, train_epochs, net_device):
-    # 训练模型
-    for epoch in range(train_epochs):
-        for image, label in train_data_loader:
-            image, label = image.to(net_device), label.to(net_device)
-            optimizer.zero_grad()
-            net_outputs = model(image)
-            loss = net_criterion(net_outputs, label)
-            loss.backward()
-            optimizer.step()
-
-        print(f'Epoch [{epoch + 1}/{train_epochs}], Loss: {loss.item():.4f}')
-
-    print('Training finished.')
-    return model
-
-
-def test(model, test_data_loader):
-    model.eval()
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for images, labels in test_data_loader:
-            images, labels = images.to(device), labels.to(device)
-            outputs = model(images)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    accuracy = correct / total
-    print(f'Test Accuracy: {accuracy * 100:.2f}%')
-    return accuracy * 100
-
-
-def mixing_model(clear_weights, poison_weights, layer_name):
-    mixture_model = copy.deepcopy(clear_weights)
-    for key_name in clear_weights:
-        if layer_name in key_name:
-            print(key_name)
-            mixture_model[key_name] = poison_weights[key_name]
-        else:
-            continue
-    return mixture_model
-
-
-if __name__ == '__main__':
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # 设置训练参数
-    batch_size = 128
-    learning_rate = 0.001
-    epochs = 2
-
+def get_mnist_dataloader(batch_size):
     # 下载并加载MNIST数据集
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
@@ -80,6 +28,7 @@ if __name__ == '__main__':
         train=False,
         transform=transform,
         download=True)
+
     train_poison_dataset = PoisonDataset(
         attack_function='trigger',
         dataset_name='mnist',
@@ -100,7 +49,7 @@ if __name__ == '__main__':
         shuffle=True)
 
     # 加载有毒数据集
-    train_poison__loader = DataLoader(
+    train_poison_loader = DataLoader(
         dataset=train_poison_dataset,
         batch_size=batch_size,
         shuffle=True)
@@ -109,15 +58,28 @@ if __name__ == '__main__':
         batch_size=batch_size,
         shuffle=True)
 
-    # 初始化模型、损失函数和优化器
+    return train_loader, test_loader, train_poison_loader, test_poison_loader
+
+
+def get_lenet_model(device):
     clear_model = LeNet().to(device)
     poison_model = LeNet().to(device)
-    clear_criterion = nn.CrossEntropyLoss()
-    poison_criterion = nn.CrossEntropyLoss()
+    return poison_model, clear_model
 
-    clear_model_optimizer = optim.Adam(clear_model.parameters(), lr=learning_rate)
-    poison_model_optimizer = optim.Adam(poison_model.parameters(), lr=learning_rate)
 
+def mnist_robustness_test(
+        clear_model,
+        poison_model,
+        train_loader,
+        train_poison__loader,
+        test_loader,
+        test_poison_loader,
+        learning_rate,
+        epochs,
+        device):
+    clear_criterion, poison_criterion = get_criterion()
+    clear_model_optimizer, poison_model_optimizer = get_optimizer(
+        clear_model=clear_model, poison_model=poison_model, learning_rate=learning_rate)
     print("Start training...")
     clear_model = train(
         model=clear_model,
@@ -129,9 +91,15 @@ if __name__ == '__main__':
 
     print("Finish clear model training")
     print("clear model in clear data test:")
-    ma_of_clear_model = test(model=clear_model, test_data_loader=test_loader)
+    ma_of_clear_model = test(
+        model=clear_model,
+        test_data_loader=test_loader,
+        device=device)
     print("clear model in poison data test:")
-    ba_of_clear_model = test(model=clear_model, test_data_loader=test_poison_loader)
+    ba_of_clear_model = test(
+        model=clear_model,
+        test_data_loader=test_poison_loader,
+        device=device)
 
     poison_model = train(
         model=poison_model,
@@ -142,60 +110,86 @@ if __name__ == '__main__':
         net_device=device)
     print("Finish poison model training")
     print("poison model in clear data test:")
-    ma_of_poison_model = test(model=poison_model, test_data_loader=test_loader)
+    ma_of_poison_model = test(
+        model=poison_model,
+        test_data_loader=test_loader,
+        device=device)
     print("poison model in poison data test:")
-    ba_of_poison_model = test(model=poison_model, test_data_loader=test_poison_loader)
+    ba_of_poison_model = test(
+        model=poison_model,
+        test_data_loader=test_poison_loader,
+        device=device)
 
     # 模型参数字典化
     clear_model_weights = clear_model.state_dict()
     poison_model_weights = poison_model.state_dict()
 
     mix_model = LeNet().to(device)
-    mix_model_weights = mixing_model(clear_model_weights, poison_model_weights, layer_name="linear")
+    mix_model_weights = mixing_model(
+        clear_model_weights,
+        poison_model_weights,
+        layer_name="linear")
     mix_model.load_state_dict(mix_model_weights)
 
     # 测试模型
     print("mix model with linear in clear data test:")
-    ma_of_linear_mix_model = test(model=mix_model, test_data_loader=test_loader)
+    ma_of_linear_mix_model = test(
+        model=mix_model,
+        test_data_loader=test_loader,
+        device=device)
     print("mix model with linear in poison data test:")
-    ba_of_linear_mix_model = test(model=mix_model, test_data_loader=test_poison_loader)
+    ba_of_linear_mix_model = test(
+        model=mix_model,
+        test_data_loader=test_poison_loader,
+        device=device)
 
-    mix_model_weights = mixing_model(clear_model_weights, poison_model_weights, layer_name="conv")
+    mix_model_weights = mixing_model(
+        clear_model_weights,
+        poison_model_weights,
+        layer_name="conv")
     mix_model.load_state_dict(mix_model_weights)
 
     # 测试模型
     print("mix model with conv in clear data test:")
-    ma_of_conv_mix_model = test(model=mix_model, test_data_loader=test_loader)
+    ma_of_conv_mix_model = test(
+        model=mix_model,
+        test_data_loader=test_loader,
+        device=device)
     print("mix model with conv in poison data test:")
-    ba_of_conv_mix_model = test(model=mix_model, test_data_loader=test_poison_loader)
+    ba_of_conv_mix_model = test(
+        model=mix_model,
+        test_data_loader=test_poison_loader,
+        device=device)
 
-    # 导入数据
-    categories = ['Ma Of Clear Model', 'Ba Of Clear Model',
-                  'Ma Of Poison Model', 'Ba Of Poison Model',
-                  "Ma Of Linear Mixture Model", "Ba Of Linear Mixture Model",
-                  "Ma Of Conv Mixture Model", "Ba Of Conv Mixture Model"]
     values = [ma_of_clear_model, ba_of_clear_model,
               ma_of_poison_model, ba_of_poison_model,
               ma_of_linear_mix_model, ba_of_linear_mix_model,
               ma_of_conv_mix_model, ba_of_conv_mix_model]
 
-    plt.rcParams['font.size'] = 8
+    return values
 
-    # 绘制柱状图
-    colors = plt.cm.viridis(np.linspace(0, 1, len(categories)))
-    bars = plt.bar(categories, values, color=colors, alpha=0.7)
 
-    # 添加标题和标签
-    plt.title('Robustness testing for various LeNet models')
-    plt.ylabel('Accuracy')
+def lenet_backdoor_information_detect():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    plt.xticks(rotation=45, ha='right')
+    # 设置训练参数
+    batch_size = 128
+    learning_rate = 0.001
+    epochs = 2
 
-    for bar, value in zip(bars, values):
-        formatted_value = '{:.2f}%'.format(value)  # 格式化为小数点后两位，并添加百分号
-        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1, formatted_value, ha='center', va='bottom')
+    train_loader, test_loader, train_poison_loader, test_poison_loader = get_mnist_dataloader(
+        batch_size=batch_size)
 
-    plt.tight_layout()
-    plt.savefig('Robustness_testing_for_various_lenet_models.png')
-    # 显示柱状图
-    plt.show()
+    # 初始化模型、损失函数和优化器
+    poison_model, clear_model = get_lenet_model(device=device)
+    values = mnist_robustness_test(
+        clear_model=clear_model,
+        poison_model=poison_model,
+        train_loader=train_loader,
+        train_poison__loader=train_poison_loader,
+        test_loader=test_loader,
+        test_poison_loader=test_poison_loader,
+        learning_rate=learning_rate,
+        epochs=epochs,
+        device=device)
+    draw_bar(values=values, net_name="lenet")

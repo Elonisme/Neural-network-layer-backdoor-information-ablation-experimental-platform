@@ -7,27 +7,37 @@ from torch.utils.data import DataLoader
 
 from dataloader import PoisonDataset
 from model.resnet import resnet18
-from tools.draw_bar import draw_bar
+from tools.draw_bar import save_bar
 from tools.mixture import mixing_model
 from tools.options import get_criterion, get_optimizer
+from tools.save_csv import save_pairs_to_csv
 from tools.test import test
 from tools.train import train
 
 
 def get_cifar10_dataloader(batch_size):
     # 下载并加载CIFAR10数据集
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    transform_train = transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
 
     train_dataset = torchvision.datasets.CIFAR10(
         root='./data/cifar10',
         train=True,
-        transform=transform,
+        transform=transform_train,
         download=True)
     test_dataset = torchvision.datasets.CIFAR10(
         root='./data/cifar10',
         train=False,
-        transform=transform,
+        transform=transform_test,
         download=True)
     train_poison_dataset = PoisonDataset(
         attack_function='trigger',
@@ -128,7 +138,7 @@ def resnet18_robustness_test(
     mix_model_weights = mixing_model(
         clear_model_weights,
         poison_model_weights,
-        layer_name="linear")
+        layer_name="fc")
     mix_model.load_state_dict(mix_model_weights)
 
     # 测试模型
@@ -173,7 +183,7 @@ def resnet18_backdoor_information_detect():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 设置训练参数
-    batch_size = 256
+    batch_size = 64
     learning_rate = 0.001
     epochs = 20
 
@@ -192,4 +202,6 @@ def resnet18_backdoor_information_detect():
         learning_rate=learning_rate,
         epochs=epochs,
         device=device)
-    draw_bar(values=values, net_name="resnet18")
+
+    save_pairs_to_csv(file_path="csv/resnet18.csv", values=values)
+    save_bar(values=values, net_name="resnet18")

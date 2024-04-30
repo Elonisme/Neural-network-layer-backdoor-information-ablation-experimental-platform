@@ -6,7 +6,7 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
 from dataloader import PoisonDataset
-from model.lenet import LeNet
+from model.cnn import CNN
 from tools.draw_bar import save_bar
 from tools.mixture import mixing_model
 from tools.options import get_criterion, get_optimizer
@@ -62,13 +62,13 @@ def get_mnist_dataloader(batch_size):
     return train_loader, test_loader, train_poison_loader, test_poison_loader
 
 
-def get_lenet_model(device):
-    clear_model = LeNet().to(device)
-    poison_model = LeNet().to(device)
+def get_cnn_model(device):
+    clear_model = CNN().to(device)
+    poison_model = CNN().to(device)
     return poison_model, clear_model
 
 
-def mnist_robustness_test(
+def cnn_robustness_test(
         clear_model,
         poison_model,
         train_loader,
@@ -125,11 +125,11 @@ def mnist_robustness_test(
     clear_model_weights = clear_model.state_dict()
     poison_model_weights = poison_model.state_dict()
 
-    mix_model = LeNet().to(device)
+    mix_model = CNN().to(device)
     mix_model_weights = mixing_model(
         clear_model_weights,
         poison_model_weights,
-        layer_name="linear")
+        layer_name="classifier")
     mix_model.load_state_dict(mix_model_weights)
 
     # 测试模型
@@ -147,7 +147,7 @@ def mnist_robustness_test(
     mix_model_weights = mixing_model(
         clear_model_weights,
         poison_model_weights,
-        layer_name="conv")
+        layer_name="features")
     mix_model.load_state_dict(mix_model_weights)
 
     # 测试模型
@@ -170,7 +170,7 @@ def mnist_robustness_test(
     return values
 
 
-def lenet_backdoor_information_detect():
+def cnn_backdoor_information_detect():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 设置训练参数
@@ -182,8 +182,8 @@ def lenet_backdoor_information_detect():
         batch_size=batch_size)
 
     # 初始化模型、损失函数和优化器
-    poison_model, clear_model = get_lenet_model(device=device)
-    values = mnist_robustness_test(
+    poison_model, clear_model = get_cnn_model(device=device)
+    values = cnn_robustness_test(
         clear_model=clear_model,
         poison_model=poison_model,
         train_loader=train_loader,
@@ -194,5 +194,5 @@ def lenet_backdoor_information_detect():
         epochs=epochs,
         device=device)
 
-    save_pairs_to_csv(file_path="./csv/lenet.csv", values=values)
-    save_bar(values=values, net_name="lenet")
+    save_pairs_to_csv(file_path="csv/cnn.csv", values=values)
+    save_bar(values=values, net_name="cnn")

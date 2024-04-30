@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="myfl" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="myfl" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="EasyFL" project-jdk-type="Python SDK" />
 </project>
